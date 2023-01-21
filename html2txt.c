@@ -1,36 +1,25 @@
-/* gcc -O2 -Igumbo -static -o html2txt html2txt.c -Lgumbo -lgumbo */
+/* gcc -O2 -Igumbo -static -o html2txt html2txt.c main.c -Lgumbo -lgumbo */
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
-#include <sys/stat.h>
-
-#include "gumbo.h"
+#include <stdarg.h>
+#include <gumbo.h>
 
 static char *
-read_stdin()
-{
-    char buffer[BUFSIZ];
-    char *output;
-    int extra;
-    int length = 0;
-    int bulk = 1024;
+buffer_printf(char *buffer, const char *format, ...) {
+  int w = 0;
+  va_list args;
 
-    output = (char *) malloc(bulk);
-    strcpy(output, "");
-    while ((extra = fread(buffer, 1, BUFSIZ, stdin))) {
-        while (length + extra > bulk - 1) {
-            bulk += bulk >> 1;
-            output = (char *) realloc(output, bulk);
-        }
-        strncat(output, buffer, extra);
-        length += strlen(buffer);
-    }
-    return output;
+  va_start(args, format);
+  w = vsprintf(buffer, format, args);
+  va_end(args);
+
+  return buffer + w;
 }
 
-static void
-print_norm(const char *text)
+static char *
+print_norm(char *buffer, const char *text)
 {
     char *str, *token, *seps, *spaces;
     int length, trailing;
@@ -42,7 +31,7 @@ print_norm(const char *text)
     spaces = str;
     while (isspace(*spaces)) {
         if (*spaces == ' ')
-            printf(" ");
+            buffer = buffer_printf(buffer, " ");
         spaces++;
     }
     trailing = 0;
@@ -53,19 +42,21 @@ print_norm(const char *text)
         spaces--;
     }
     token = strtok(str, seps);
-    printf(token);
+    buffer = buffer_printf(buffer, token);
     token = strtok(NULL, seps);
     while (token) {
-        printf(" %s", token);
+        buffer = buffer_printf(buffer, " %s", token);
         token = strtok(NULL, seps);
     }
     while (trailing--)
-        printf(" ");
+        buffer = buffer_printf(buffer, " ");
     free(str);
+
+    return buffer;
 }
 
-static void
-print_tree(GumboNode *node, int plain)
+static char *
+dump_tree(GumboNode *node, char *buffer, int plain)
 {
     GumboVector *children;
     GumboAttribute *href, *src, *alt;
@@ -73,24 +64,24 @@ print_tree(GumboNode *node, int plain)
 
     if (node->type == GUMBO_NODE_TEXT) {
         if (plain)
-            printf(node->v.text.text);
+            buffer = buffer_printf(buffer, node->v.text.text);
         else
-            print_norm(node->v.text.text);
+            buffer = print_norm(buffer, node->v.text.text);
     } else if (
         node->type == GUMBO_NODE_ELEMENT &&
         node->v.element.tag != GUMBO_TAG_SCRIPT &&
         node->v.element.tag != GUMBO_TAG_STYLE
     ) {
         if (node->v.element.tag == GUMBO_TAG_BR) {
-            printf("\n");
-            return;
+            buffer = buffer_printf(buffer, "\n");
+            return buffer;
         }
         plain = (
             node->v.element.tag == GUMBO_TAG_CODE ||
             node->v.element.tag == GUMBO_TAG_PRE
         );
         if (node->v.element.tag == GUMBO_TAG_LI)
-            printf("* ");
+            buffer = buffer_printf(buffer, "* ");
         if (
             node->v.element.tag == GUMBO_TAG_H1 ||
             node->v.element.tag == GUMBO_TAG_H2 ||
@@ -99,10 +90,10 @@ print_tree(GumboNode *node, int plain)
             node->v.element.tag == GUMBO_TAG_H5 ||
             node->v.element.tag == GUMBO_TAG_H6
         )
-            printf("\n\n");
+            buffer = buffer_printf(buffer, "\n\n");
         children = &node->v.element.children;
         for (i = 0; i < (int) children->length; i++)
-            print_tree((GumboNode *) children->data[i], plain);
+            buffer = dump_tree((GumboNode *) children->data[i], buffer, plain);
         if (
             node->v.element.tag == GUMBO_TAG_TITLE ||
             node->v.element.tag == GUMBO_TAG_H1 ||
@@ -113,45 +104,41 @@ print_tree(GumboNode *node, int plain)
             node->v.element.tag == GUMBO_TAG_H6 ||
             node->v.element.tag == GUMBO_TAG_P
         )
-            printf("\n\n");
+            buffer = buffer_printf(buffer, "\n\n");
         else if (
             node->v.element.tag == GUMBO_TAG_LI ||
             node->v.element.tag == GUMBO_TAG_TR
         )
-            printf("\n");
+            buffer = buffer_printf(buffer, "\n");
         else if (node->v.element.tag == GUMBO_TAG_TD)
-            printf("\t");
+            buffer = buffer_printf(buffer, "\t");
         else if (node->v.element.tag == GUMBO_TAG_A) {
             href = gumbo_get_attribute(&node->v.element.attributes, "href");
             if (href)
-                printf(" <%s>", href->value);
+                buffer = buffer_printf(buffer, " <%s>", href->value);
         }
         else if (node->v.element.tag == GUMBO_TAG_IMG) {
             src = gumbo_get_attribute(&node->v.element.attributes, "src");
             alt = gumbo_get_attribute(&node->v.element.attributes, "alt");
             if (alt && strlen(alt->value))
-                printf("\n{%s <%s>}\n", alt->value, src->value);
+                buffer = buffer_printf(buffer, "\n(image: %s <%s>)\n", alt->value, src->value);
             else
-                printf("\n{<%s>}\n", src->value);
+                buffer = buffer_printf(buffer, "\n(image: <%s>)\n", src->value);
         }
     }
+    return buffer;
 }
 
-int
-main(int argc, char *argv[])
-{
-    char *raw_html;
-    GumboOutput *parsed_html;
+char *html2text(char *html) {
+    char *text;
 
-    if (argc != 1) {
-        fprintf(stderr, "%s expects no arguments\n", argv[0]);
-        return 1;
-    }
-    raw_html = read_stdin();
-    parsed_html = gumbo_parse(raw_html);
-    print_tree(parsed_html->root, 0);
-    printf("\n");
+    GumboOutput *parsed_html = gumbo_parse(html);
+
+    text = malloc(strlen(html));
+    memset(text, 0, strlen(html));
+
+    dump_tree(parsed_html->root, text, 0);
+
     gumbo_destroy_output(&kGumboDefaultOptions, parsed_html);
-    free(raw_html);
-    return 0;
+    return text;
 }
