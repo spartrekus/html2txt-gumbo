@@ -1,6 +1,6 @@
 
 all:
-	     gcc -O2 -Igumbo -static -o html2txt html2txt.c -Lgumbo -lgumbo
+	     gcc -g -O0 -Igumbo -o html2txt main.c html2txt.c -lgumbo
 
 
 

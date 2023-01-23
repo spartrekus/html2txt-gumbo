@@ -14,7 +14,7 @@ buffer_printf(char *buffer, const char *format, ...) {
   va_start(args, format);
   w = vsprintf(buffer, format, args);
   va_end(args);
-
+  
   return buffer + w;
 }
 
@@ -42,7 +42,7 @@ print_norm(char *buffer, const char *text)
         spaces--;
     }
     token = strtok(str, seps);
-    buffer = buffer_printf(buffer, token);
+    buffer = buffer_printf(buffer, "%s", token);
     token = strtok(NULL, seps);
     while (token) {
         buffer = buffer_printf(buffer, " %s", token);
@@ -64,7 +64,7 @@ dump_tree(GumboNode *node, char *buffer, int plain)
 
     if (node->type == GUMBO_NODE_TEXT) {
         if (plain)
-            buffer = buffer_printf(buffer, node->v.text.text);
+            buffer = buffer_printf(buffer, "%s", node->v.text.text);
         else
             buffer = print_norm(buffer, node->v.text.text);
     } else if (
@@ -129,16 +129,17 @@ dump_tree(GumboNode *node, char *buffer, int plain)
     return buffer;
 }
 
-char *html2text(char *html) {
+char *
+html2text(char *html) {
     char *text;
-
+    size_t buf_size;
     GumboOutput *parsed_html = gumbo_parse(html);
 
-    text = malloc(strlen(html));
-    memset(text, 0, strlen(html));
-
+    buf_size = strlen(html) * 2;
+    text = malloc(buf_size);
+    memset(text, 0, buf_size);
     dump_tree(parsed_html->root, text, 0);
-
+  
     gumbo_destroy_output(&kGumboDefaultOptions, parsed_html);
     return text;
 }
